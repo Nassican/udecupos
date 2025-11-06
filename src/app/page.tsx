@@ -88,6 +88,18 @@ export default function Home() {
     return "bg-secondary text-secondary-foreground";
   };
 
+  // Extra safeguard: on mobile, blur any focused element when opening selection dialogs
+  useEffect(() => {
+    if (periodoOpen || programaOpen || materiaOpen) {
+      if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
+        setTimeout(() => {
+          const el = document.activeElement as HTMLElement | null;
+          el?.blur?.();
+        }, 0);
+      }
+    }
+  }, [periodoOpen, programaOpen, materiaOpen]);
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -225,7 +237,7 @@ export default function Home() {
                     <span className="text-muted-foreground"><ChevronDownIcon className="w-4 h-4" /></span>
                   </Button>
                   <Dialog open={periodoOpen} onOpenChange={setPeriodoOpen}>
-                    <DialogContent className="p-0 gap-0">
+                    <DialogContent className="p-0 gap-0" onOpenAutoFocus={(e) => e.preventDefault()}>
                       <DialogHeader className="px-4 pt-4 pb-2">
                         <DialogTitle>Seleccionar periodo</DialogTitle>
                       </DialogHeader>
@@ -254,6 +266,18 @@ export default function Home() {
                 </div>
                 {/* Desktop: Select */}
                 <div className="hidden md:block">
+                  <Select value={periodo} onValueChange={onPeriodoChange} disabled={loadingP}>
+                    <SelectTrigger className="w-full h-auto min-h-9 items-start text-left">
+                      <SelectValue className="whitespace-normal wrap-break-word md:line-clamp-2" placeholder="Seleccione un periodo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {periodos.map((p, i) => (
+                        <SelectItem key={`${p.codigo}-${i}`} value={p.codigo}>
+                          {p.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -285,7 +309,7 @@ export default function Home() {
                     </span>
                   </Button>
                   <Dialog open={programaOpen} onOpenChange={setProgramaOpen}>
-                    <DialogContent className="p-0 gap-0">
+                    <DialogContent className="p-0 gap-0" onOpenAutoFocus={(e) => e.preventDefault()}>
                       <DialogHeader className="px-4 pt-4 pb-2">
                         <DialogTitle>Seleccionar programa</DialogTitle>
                       </DialogHeader>
@@ -361,7 +385,7 @@ export default function Home() {
                     <span className="text-muted-foreground"><ChevronDownIcon className="w-4 h-4" /></span>
                   </Button>
                   <Dialog open={materiaOpen} onOpenChange={setMateriaOpen}>
-                    <DialogContent className="p-0 gap-0">
+                    <DialogContent className="p-0 gap-0" onOpenAutoFocus={(e) => e.preventDefault()}>
                       <DialogHeader className="px-4 pt-4 pb-2">
                         <DialogTitle>Seleccionar materia</DialogTitle>
                       </DialogHeader>
