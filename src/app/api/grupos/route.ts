@@ -108,7 +108,8 @@ async function fetchGrupos(modalidadId: string, periodId: string, programId: str
         const parsedSlots: Slot[] = matches.map(({ dia, texto }) => {
           // ejemplo texto: "10 - 11AM(A204-... )" o "2 - 3PM(A204-...)"
           const aulaMatch = texto.match(/\(([^\)]*)\)/);
-          const aula = aulaMatch?.[1]?.trim();
+          const aulaRaw = aulaMatch?.[1]?.trim();
+          const aula = aulaRaw && aulaRaw !== '-' ? aulaRaw : undefined;
           const tMatch = texto.match(/(\d{1,2})\s*-\s*(\d{1,2})\s*(AM|PM)/i);
           const desde = tMatch ? tMatch[1] : '';
           const hasta = tMatch ? tMatch[2] : '';
@@ -128,19 +129,29 @@ async function fetchGrupos(modalidadId: string, periodId: string, programId: str
         const orderDay: Record<string, number> = { Lunes:1, Martes:2, 'Miércoles':3, Miercoles:3, Jueves:4, Viernes:5, Sábado:6, Sabado:6, Domingo:7 };
         parsedSlots.sort((a, b) => (orderDay[a.dia]||9) - (orderDay[b.dia]||9) || toMinutes(a.desde, a.ampm) - toMinutes(b.desde, b.ampm));
 
-        // Merge contiguous en mismo dia y aula: si fin de uno == inicio del siguiente
+        // Merge contiguous en mismo dia. Si falta aula en el tramo actual, se infiere del anterior.
         const mergedSlots: Slot[] = [];
         for (const s of parsedSlots) {
           const last = mergedSlots[mergedSlots.length - 1];
-          const sameDay = last && last.dia === s.dia;
-          const sameAula = last && (last.aula || '') === (s.aula || '');
-          const contiguous = last && toMinutes(last.hasta, s.ampm) === toMinutes(s.desde, s.ampm);
+          const sameDay = !!last && last.dia === s.dia;
+          // Resolver aula actual: si viene vacío y es mismo día, heredar del último tramo
+          const resolvedAula = s.aula || (sameDay ? last?.aula : undefined);
+          const lastAula = last?.aula;
+          const sameAula = !!last && (lastAula || '') === (resolvedAula || '');
+          const contiguous = !!last && toMinutes(last.hasta, s.ampm) === toMinutes(s.desde, s.ampm);
           if (last && sameDay && sameAula && contiguous) {
             last.hasta = s.hasta;
             last.ampm = s.ampm || last.ampm;
+            // Asegurar que el aula quede propagada si estaba ausente
+            if (!last.aula && resolvedAula) last.aula = resolvedAula;
             last.label = `${last.dia}: ${last.desde}-${last.hasta}${last.ampm ? last.ampm : ''}${last.aula ? ` (${last.aula})` : ''}`;
           } else {
-            mergedSlots.push({ ...s });
+            const withResolved: Slot = {
+              ...s,
+              aula: resolvedAula,
+              label: `${s.dia}: ${s.desde}-${s.hasta}${s.ampm ? s.ampm : ''}${resolvedAula ? ` (${resolvedAula})` : ''}`,
+            };
+            mergedSlots.push(withResolved);
           }
         }
 

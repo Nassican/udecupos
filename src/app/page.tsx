@@ -32,6 +32,8 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { ChevronDownIcon } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
 
 type Periodo = { codigo: string; nombre: string };
 type Programa = { codigo: string; nombre: string; titulo?: string; sede?: string; label?: string };
@@ -55,6 +57,7 @@ type Grupo = {
   mergedSlots?: string[];
   docentes?: string;
   label?: string;
+  modalidadId?: string;
 };
 
 export default function Home() {
@@ -66,9 +69,9 @@ export default function Home() {
   const [programaOpen, setProgramaOpen] = useState(false);
   const [materias, setMaterias] = useState<Materia[]>([]);
   const [materia, setMateria] = useState<string>("");
-  const [materiaOpen, setMateriaOpen] = useState(false);
+  const [materiaQuery, setMateriaQuery] = useState("");
   const [modalidades, setModalidades] = useState<Modalidad[]>([]);
-  const [modalidad, setModalidad] = useState<string>("");
+  const [selectedModalidades, setSelectedModalidades] = useState<string[]>([]);
   const [grupos, setGrupos] = useState<Grupo[]>([]);
   const [grupo, setGrupo] = useState<string>("");
   const [loadingP, setLoadingP] = useState(false);
@@ -77,20 +80,109 @@ export default function Home() {
   const [loadingMod, setLoadingMod] = useState(false);
   const [loadingGpo, setLoadingGpo] = useState(false);
   const [error, setError] = useState<string>("");
+  const [grupoSortKey, setGrupoSortKey] = useState<"grupo"|"sede"|"dia"|"ocupacion"|"docente">("grupo");
+  const [grupoSortDir, setGrupoSortDir] = useState<"asc"|"desc">("asc");
 
   const sedeBadgeClass = (s?: string) => {
     const key = (s || "").toLowerCase();
-    if (key.includes("pasto")) return "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200 border-transparent";
-    if (key.includes("tumaco")) return "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-200 border-transparent";
-    if (key.includes("ipiales")) return "bg-violet-100 text-violet-900 dark:bg-violet-900/30 dark:text-violet-200 border-transparent";
-    if (key.includes("tuquerres")) return "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200 border-transparent";
-    if (key.includes("general")) return "bg-zinc-100 text-zinc-900 dark:bg-zinc-800/60 dark:text-zinc-200 border-transparent";
+    if (key.includes("pasto")) return "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200 border-emerald-300";
+    if (key.includes("tumaco")) return "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-200 border-sky-300";
+    if (key.includes("ipiales")) return "bg-violet-100 text-violet-900 dark:bg-violet-900/30 dark:text-violet-200 border-violet-300";
+    if (key.includes("tuquerres")) return "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200 border-amber-300";
+    if (key.includes("general")) return "bg-zinc-100 text-zinc-900 dark:bg-zinc-800/60 dark:text-zinc-200 border-zinc-300";
     return "bg-secondary text-secondary-foreground";
+  };
+
+  const dayOrder: Record<string, number> = { Lunes:1, Martes:2, Miércoles:3, Miercoles:3, Jueves:4, Viernes:5, Sábado:6, Sabado:6, Domingo:7 };
+  const dayBadgeClass = (d: string) => {
+    const k = d.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+    if (k.startsWith('lunes')) return 'bg-blue-100 text-blue-900 dark:bg-blue-900/30 dark:text-blue-200 border-transparent';
+    if (k.startsWith('martes')) return 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200 border-transparent';
+    if (k.startsWith('miercoles')) return 'bg-violet-100 text-violet-900 dark:bg-violet-900/30 dark:text-violet-200 border-transparent';
+    if (k.startsWith('jueves')) return 'bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200 border-transparent';
+    if (k.startsWith('viernes')) return 'bg-cyan-100 text-cyan-900 dark:bg-cyan-900/30 dark:text-cyan-200 border-transparent';
+    if (k.startsWith('sabado')) return 'bg-rose-100 text-rose-900 dark:bg-rose-900/30 dark:text-rose-200 border-transparent';
+    if (k.startsWith('domingo')) return 'bg-slate-200 text-slate-900 dark:bg-slate-800/60 dark:text-slate-200 border-transparent';
+    return 'bg-secondary text-secondary-foreground';
+  };
+  const getFirstDayIndex = (gr: Grupo) => {
+    const label = gr.mergedSlots?.[0] || gr.horario?.[0] || "";
+    const day = label.split(":")[0]?.trim();
+    return dayOrder[day] || 99;
+  };
+  const sedeOrder: Record<string, number> = { pasto: 1, tumaco: 2, ipiales: 3, tuquerres: 4, general: 9 };
+  const getGrupoNumber = (gr: Grupo) => {
+    const g = gr.grupo || gr.codigo;
+    const n = parseInt(String(g).replace(/\D+/g, ""), 10);
+    return isFinite(n) ? n : 0;
+  };
+  const getOcupPct = (gr: Grupo) => {
+    const m = (gr.ocupacion || "").match(/(\d+)\s*\/\s*(\d+)/);
+    if (!m) return 0;
+    const a = parseInt(m[1], 10);
+    const t = Math.max(parseInt(m[2], 10), 1);
+    return a / t;
+  };
+  const getDocente = (gr: Grupo) => (gr.docentes || "").toLowerCase();
+  const getModalidadPriority = (id: string) => {
+    const mod = modalidades.find((m) => m.codigo === id);
+    const normalize = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+    const nombre = normalize(mod?.nombre || "");
+    const codigo = normalize(mod?.codigo || "");
+    // Detectar Teórica por nombre o código (TEO, T, TEORICA, TEOR)
+    if (nombre.includes("teor") || nombre.startsWith("teo") || codigo.includes("teo") || codigo === "t") return 1; // Teórica primero
+    // Detectar Práctica/Laboratorio por nombre o código (PRA, P, PRACTICA, PRAC, LAB)
+    if (
+      nombre.includes("prac") || nombre.startsWith("pra") || nombre.includes("laboratorio") || nombre.includes("lab") ||
+      codigo.includes("pra") || codigo.includes("lab") || codigo === "p" || codigo === "l"
+    ) return 2; // Práctica/Lab después
+    return 9; // otras al final
+  };
+
+  const sortedGrupos = [...grupos].sort((a, b) => {
+    let va = 0, vb = 0; let sa = "", sb = "";
+    switch (grupoSortKey) {
+      case "grupo":
+        va = getGrupoNumber(a); vb = getGrupoNumber(b); break;
+      case "sede":
+        sa = (a.sede || "").toLowerCase(); sb = (b.sede || "").toLowerCase();
+        const oa = sedeOrder[sa.split('-').pop() || sa] ?? 99;
+        const ob = sedeOrder[sb.split('-').pop() || sb] ?? 99;
+        if (oa !== ob) return grupoSortDir === "asc" ? oa - ob : ob - oa;
+        if (sa < sb) return grupoSortDir === "asc" ? -1 : 1;
+        if (sa > sb) return grupoSortDir === "asc" ? 1 : -1;
+        return 0;
+      case "dia":
+        va = getFirstDayIndex(a); vb = getFirstDayIndex(b); break;
+      case "ocupacion":
+        va = getOcupPct(a); vb = getOcupPct(b); break;
+      case "docente":
+        sa = getDocente(a); sb = getDocente(b);
+        if (sa < sb) return grupoSortDir === "asc" ? -1 : 1;
+        if (sa > sb) return grupoSortDir === "asc" ? 1 : -1;
+        return 0;
+    }
+    if (va < vb) return grupoSortDir === "asc" ? -1 : 1;
+    if (va > vb) return grupoSortDir === "asc" ? 1 : -1;
+    return 0;
+  });
+
+  const ocupacionBadgeClass = (ocup?: string) => {
+    // Expect formats like "15/20", "37/37", etc.
+    const m = (ocup || "").match(/(\d+)\s*\/\s*(\d+)/);
+    if (!m) return "bg-secondary text-secondary-foreground";
+    const actual = parseInt(m[1] || "0", 10);
+    const total = Math.max(parseInt(m[2] || "0", 10), 1);
+    const pct = actual / total;
+    if (pct >= 1) return "bg-destructive text-white border-transparent dark:bg-destructive/80";
+    if (pct >= 0.8)
+      return "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200 border-transparent";
+    return "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200 border-transparent";
   };
 
   // Extra safeguard: on mobile, blur any focused element when opening selection dialogs
   useEffect(() => {
-    if (periodoOpen || programaOpen || materiaOpen) {
+    if (periodoOpen || programaOpen) {
       if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
         setTimeout(() => {
           const el = document.activeElement as HTMLElement | null;
@@ -98,7 +190,7 @@ export default function Home() {
         }, 0);
       }
     }
-  }, [periodoOpen, programaOpen, materiaOpen]);
+  }, [periodoOpen, programaOpen]);
 
   useEffect(() => {
     const load = async () => {
@@ -123,7 +215,7 @@ export default function Home() {
     setMaterias([]);
     setMateria("");
     setModalidades([]);
-    setModalidad("");
+    setSelectedModalidades([]);
     setGrupos([]);
     setGrupo("");
     if (!value) return;
@@ -148,7 +240,7 @@ export default function Home() {
     setMaterias([]);
     setMateria("");
     setModalidades([]);
-    setModalidad("");
+    setSelectedModalidades([]);
     if (!value || !periodo) return;
     try {
       setLoadingM(true);
@@ -169,7 +261,7 @@ export default function Home() {
   const onMateriaChange = async (value: string) => {
     setMateria(value);
     setModalidades([]);
-    setModalidad("");
+    setSelectedModalidades([]);
     setGrupos([]);
     setGrupo("");
     if (!value || !periodo || !programa) return;
@@ -189,20 +281,34 @@ export default function Home() {
     }
   };
 
-  const onModalidadChange = async (value: string) => {
-    setModalidad(value);
-    setGrupos([]);
+  const toggleModalidad = async (value: string) => {
+    // Toggle selection of modalidad and fetch groups for all selected modalidades
+    const next = selectedModalidades.includes(value)
+      ? selectedModalidades.filter((m) => m !== value)
+      : [...selectedModalidades, value];
+    setSelectedModalidades(next);
     setGrupo("");
-    if (!value || !periodo || !programa || !materia) return;
+    if (!periodo || !programa || !materia) return;
+    if (next.length === 0) {
+      setGrupos([]);
+      return;
+    }
     try {
       setLoadingGpo(true);
-      const res = await fetch(`/api/grupos`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modalidadId: value, periodId: periodo, programId: programa, materiaId: materia })
-      });
-      const data = await res.json();
-      setGrupos(data.grupos || []);
+      const results: Grupo[] = [];
+      for (const mid of next) {
+        // Fetch grupos por cada modalidad seleccionada y combinar
+        const res = await fetch(`/api/grupos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modalidadId: mid, periodId: periodo, programId: programa, materiaId: materia })
+        });
+        const data = await res.json();
+        if (Array.isArray(data.grupos)) {
+          results.push(...data.grupos.map((g: Grupo) => ({ ...g, modalidadId: mid })));
+        }
+      }
+      setGrupos(results);
     } catch {
       setError("No se pudieron cargar los grupos");
     } finally {
@@ -212,12 +318,12 @@ export default function Home() {
 
   return (
     <div className="min-h-screen w-full bg-zinc-50 text-zinc-900 dark:bg-black dark:text-zinc-50">
-      <div className="mx-auto max-w-3xl p-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Consulta de Cupos - Demo</CardTitle>
+      <div className="mx-auto max-w-3xl p-3">
+        <Card className="p-3 gap-0">
+          <CardHeader className="p-1">
+            <CardTitle>Consulta de Cupos - UdeCupos</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-1">
             <div className="grid gap-4">
               <div className="grid gap-2">
                 <Label>Periodo</Label>
@@ -369,129 +475,212 @@ export default function Home() {
 
               <div className="grid gap-2">
                 <Label>Materia</Label>
-                {/* Mobile: Dialog + Command */}
-                <div className="block md:hidden">
-                  <Button
-                    variant="outline"
-                    onClick={() => setMateriaOpen(true)}
-                    disabled={!programa || loadingM}
-                    className="w-full h-auto min-h-9 items-start justify-between text-left whitespace-normal wrap-break-word font-normal"
-                  >
-                    <span className="p-0">
-                      {materia
-                        ? materias.find((m) => m.codigo === materia)?.nombre || "Materia"
-                        : "Seleccione una materia"}
-                    </span>
-                    <span className="text-muted-foreground"><ChevronDownIcon className="w-4 h-4" /></span>
-                  </Button>
-                  <Dialog open={materiaOpen} onOpenChange={setMateriaOpen}>
-                    <DialogContent className="p-0 gap-0" onOpenAutoFocus={(e) => e.preventDefault()}>
-                      <DialogHeader className="px-4 pt-4 pb-2">
-                        <DialogTitle>Seleccionar materia</DialogTitle>
-                      </DialogHeader>
-                      <Command>
-                        <CommandInput autoFocus={false} placeholder="Buscar materia..." />
-                        <CommandList>
-                          <CommandEmpty>No se encontraron materias</CommandEmpty>
-                          <CommandGroup>
-                            {materias.map((m, i) => (
-                              <CommandItem
-                                key={`${m.codigo}-${i}`}
-                                value={m.nombre}
-                                onSelect={() => {
-                                  setMateriaOpen(false);
-                                  onMateriaChange(m.codigo);
-                                }}
-                              >
-                                {m.nombre}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-                {/* Desktop: Select */}
-                <div className="hidden md:block">
-                  <Select value={materia} onValueChange={onMateriaChange} disabled={!programa || loadingM}>
-                    <SelectTrigger className="w-full h-auto min-h-9 items-start text-left">
-                      <SelectValue className="whitespace-normal wrap-break-word md:line-clamp-2" placeholder="Seleccione una materia" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {materias.map((m, i) => (
-                        <SelectItem key={`${m.codigo}-${i}`} value={m.codigo}>
-                          {m.nombre}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {loadingM ? (
+                  <div className="text-sm text-muted-foreground">Cargando materias...</div>
+                ) : !programa ? (
+                  <div className="text-sm text-muted-foreground">Seleccione un programa</div>
+                ) : materias.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No hay materias disponibles</div>
+                ) : (
+                  <>
+                    <Input
+                      value={materiaQuery}
+                      onChange={(e) => setMateriaQuery(e.target.value)}
+                      placeholder="Buscar materia..."
+                      className="h-9"
+                    />
+                    <ScrollArea className="h-56 sm:h-64 md:h-72 w-full rounded-md border">
+                      <div className="p-2 grid gap-2 grid-cols-1">
+                        {materias
+                          .filter((m) => {
+                            const q = materiaQuery.trim().toLowerCase();
+                            if (!q) return true;
+                            const nombre = (m.nombre || "").toLowerCase();
+                            const codigo = (m.codigo || "").toLowerCase();
+                            return nombre.includes(q) || codigo.includes(q);
+                          })
+                          .map((m, i) => {
+                        const isSel = materia === m.codigo;
+                        return (
+                          <Card
+                            key={`${m.codigo}-${i}`}
+                            data-selected={isSel}
+                            onClick={() => onMateriaChange(m.codigo)}
+                            className={`cursor-pointer transition-shadow p-0 ${isSel ? "border-ring ring-2 ring-ring/50" : "hover:shadow-sm"}`}
+                          >
+                            <CardContent className="p-1 px-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-sm whitespace-normal wrap-break-word md:line-clamp-2">{m.nombre}</span>
+                                {isSel ? (
+                                  <Badge variant="default" className="bg-gray-600">Seleccionada</Badge>
+                                ) : null}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                          })}
+                      </div>
+                    </ScrollArea>
+                  </>
+                )}
               </div>
 
               <div className="grid gap-2">
                 <Label>Modalidad</Label>
-                <Select value={modalidad} onValueChange={onModalidadChange} disabled={!materia || loadingMod}>
-                  <SelectTrigger className="w-full h-auto min-h-9 items-start text-left">
-                    <SelectValue className="whitespace-normal wrap-break-word" placeholder="Seleccione una modalidad" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {modalidades.map((mo, i) => (
-                      <SelectItem key={`${mo.codigo}-${i}`} value={mo.codigo}>
-                        {mo.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {loadingMod ? (
+                  <div className="text-sm text-muted-foreground">Cargando modalidades...</div>
+                ) : !materia ? (
+                  <div className="text-sm text-muted-foreground">Seleccione una materia</div>
+                ) : modalidades.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No hay modalidades disponibles</div>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {modalidades.map((mo, i) => {
+                      const selected = selectedModalidades.includes(mo.codigo);
+                      return (
+                        <Card
+                          key={`${mo.codigo}-${i}`}
+                          data-selected={selected}
+                          onClick={() => toggleModalidad(mo.codigo)}
+                          className={`cursor-pointer transition-shadow p-0 ${selected ? "border-ring ring-2 ring-ring/50" : "hover:shadow-sm"}`}
+                        >
+                          <CardContent className="px-3 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-sm font-medium">{mo.nombre}</div>
+                              {selected ? (
+                                <Badge variant="default" className="bg-gray-600">Seleccionada</Badge>
+                              ) : null}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
+              {selectedModalidades.length ? (
+                <div className="text-xs text-muted-foreground">
+                  Modalidades seleccionadas: {selectedModalidades.map((id) => modalidades.find((m) => m.codigo === id)?.nombre || id).join(', ')}
+                </div>
+              ) : null}
 
               <div className="grid gap-2">
                 <Label>Grupo (horario)</Label>
+                <div className="text-xs">
+                  <div className="text-muted-foreground mb-1">Ordenar por:</div>
+                  <div className="flex flex-col md:flex-row md:items-center gap-2">
+                    <Select
+                      value={grupoSortKey}
+                      onValueChange={(v) => setGrupoSortKey(v as "grupo"|"sede"|"dia"|"ocupacion"|"docente")}
+                    >
+                      <SelectTrigger className="h-10 w-full md:h-8 md:w-[200px]"><SelectValue placeholder="Campo" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="grupo">Número de grupo</SelectItem>
+                        <SelectItem value="sede">Sede</SelectItem>
+                        <SelectItem value="dia">Días</SelectItem>
+                        <SelectItem value="ocupacion">Cupos</SelectItem>
+                        <SelectItem value="docente">Docente</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={grupoSortDir}
+                      onValueChange={(v) => setGrupoSortDir(v as "asc"|"desc")}
+                    >
+                      <SelectTrigger className="h-10 w-full md:h-8 md:w-[160px]"><SelectValue placeholder="Dirección" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="asc">Ascendente</SelectItem>
+                        <SelectItem value="desc">Descendente</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
                 {loadingGpo ? (
                   <div className="text-sm text-muted-foreground">Cargando grupos...</div>
-                ) : !modalidad ? (
+                ) : selectedModalidades.length === 0 ? (
                   <div className="text-sm text-muted-foreground">Seleccione una modalidad</div>
                 ) : grupos.length === 0 ? (
                   <div className="text-sm text-muted-foreground">No hay grupos disponibles</div>
                 ) : (
-                  <div className="grid gap-2">
-                    {grupos.map((gr, i) => {
-                      const selected = grupo === gr.codigo;
-                      const titulo = gr.grupo ? `G${gr.grupo}` : `G${gr.codigo}`;
-                      const horarioFull = gr.mergedSlots?.length
-                        ? gr.mergedSlots.join(" • ")
-                        : gr.horario?.join(" • ") || "";
+                  <div className="grid gap-4">
+                    {[...selectedModalidades]
+                      .sort((a,b)=>{
+                        const pa = getModalidadPriority(a);
+                        const pb = getModalidadPriority(b);
+                        if (pa !== pb) return pa - pb;
+                        const norm = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+                        const na = norm(modalidades.find(m=>m.codigo===a)?.nombre || '');
+                        const nb = norm(modalidades.find(m=>m.codigo===b)?.nombre || '');
+                        if (na < nb) return -1;
+                        if (na > nb) return 1;
+                        return 0;
+                      })
+                      .map((mid) => {
+                      const nombre = modalidades.find((m) => m.codigo === mid)?.nombre || mid;
+                      const list = sortedGrupos.filter((g) => g.modalidadId === mid);
+                      if (!list.length) return null;
                       return (
-                        <Card
-                          key={`${gr.codigo}-${i}`}
-                          data-selected={selected}
-                          onClick={() => setGrupo(gr.codigo)}
-                          className={`cursor-pointer transition-shadow p-0 ${selected ? "border-ring ring-2 ring-ring/50" : "hover:shadow-sm"}`}
-                        >
-                          <CardContent className="p-3">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="text-sm font-medium">
-                                {titulo}
-                                {gr.sede ? (
-                                  <span className="text-muted-foreground"> • {gr.sede}</span>
-                                ) : null}
-                              </div>
-                              {gr.ocupacion ? (
-                                <Badge
-                                  variant={gr.ocupacion.endsWith("/20") && gr.ocupacion.startsWith("20") ? "destructive" : "secondary"}
+                        <div key={mid}>
+                          <div className="text-xs font-semibold text-muted-foreground uppercase mb-1">{nombre}</div>
+                          <div className="grid gap-2">
+                            {list.map((gr, i) => {
+                              const selected = grupo === gr.codigo;
+                              const titulo = gr.grupo ? `G${gr.grupo}` : `G${gr.codigo}`;
+                              return (
+                                <Card
+                                  key={`${gr.codigo}-${i}`}
+                                  data-selected={selected}
+                                  onClick={() => setGrupo(gr.codigo)}
+                                  className={`cursor-pointer transition-shadow p-0 ${selected ? "border-ring ring-2 ring-ring/50" : "hover:shadow-sm"}`}
                                 >
-                                  {gr.ocupacion}
-                                </Badge>
-                              ) : null}
-                            </div>
-                            {horarioFull ? (
-                              <div className="text-xs text-muted-foreground mt-1">{horarioFull}</div>
-                            ) : null}
-                            {gr.docentes ? (
-                              <div className="text-xs text-muted-foreground">{gr.docentes}</div>
-                            ) : null}
-                          </CardContent>
-                        </Card>
+                                  <CardContent className="p-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="text-sm font-medium">
+                                        <Badge className="align-middle inline-block bg-primary text-primary-foreground border-transparent">{titulo}</Badge>
+                                        {gr.sede ? (
+                                          <span className="ml-1 align-middle inline-block">
+                                            <Badge className={sedeBadgeClass(gr.sede)}>{gr.sede}</Badge>
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      {gr.ocupacion ? (
+                                        <Badge className={ocupacionBadgeClass(gr.ocupacion)}>
+                                          {gr.ocupacion}
+                                        </Badge>
+                                      ) : null}
+                                    </div>
+                                    {(() => {
+                                      const labels = gr.mergedSlots?.length ? gr.mergedSlots : (gr.horario || []);
+                                      const byDay = new Map<string, string[]>();
+                                      for (const l of labels) {
+                                        const s = String(l);
+                                        const [dRaw, restRaw] = s.split(":");
+                                        const d = (dRaw || "").trim();
+                                        const rest = (restRaw || "").trim();
+                                        if (!d) continue;
+                                        if (!byDay.has(d)) byDay.set(d, []);
+                                        if (rest) byDay.get(d)!.push(rest);
+                                      }
+                                      const entries = Array.from(byDay.entries());
+                                      return entries.length ? (
+                                        <div className="mt-1 flex gap-1 overflow-x-auto whitespace-nowrap">
+                                          {entries.map(([d, segs]) => (
+                                            <Badge key={d} className={`${dayBadgeClass(d)} inline-flex whitespace-nowrap`}>
+                                              {d}
+                                              {segs.length ? `: ${segs.join(" · ")}` : ""}
+                                            </Badge>
+                                          ))}
+                                        </div>
+                                      ) : null;
+                                    })()}
+                                    {gr.docentes ? (
+                                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 mt-1">Docente:{" "}{gr.docentes}</div>
+                                    ) : null}
+                                  </CardContent>
+                                </Card>
+                              );
+                            })}
+                          </div>
+                        </div>
                       );
                     })}
                   </div>
