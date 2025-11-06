@@ -230,7 +230,7 @@ export default function Home() {
                         <DialogTitle>Seleccionar periodo</DialogTitle>
                       </DialogHeader>
                       <Command>
-                        <CommandInput placeholder="Buscar periodo..." />
+                        <CommandInput autoFocus={false} placeholder="Buscar periodo..." />
                         <CommandList>
                           <CommandEmpty>No se encontraron periodos</CommandEmpty>
                           <CommandGroup>
@@ -290,7 +290,7 @@ export default function Home() {
                         <DialogTitle>Seleccionar programa</DialogTitle>
                       </DialogHeader>
                       <Command>
-                        <CommandInput placeholder="Buscar programa..." />
+                        <CommandInput autoFocus={false} placeholder="Buscar programa..." />
                         <CommandList>
                           <CommandEmpty>No se encontraron programas</CommandEmpty>
                           <CommandGroup>
@@ -366,7 +366,7 @@ export default function Home() {
                         <DialogTitle>Seleccionar materia</DialogTitle>
                       </DialogHeader>
                       <Command>
-                        <CommandInput placeholder="Buscar materia..." />
+                        <CommandInput autoFocus={false} placeholder="Buscar materia..." />
                         <CommandList>
                           <CommandEmpty>No se encontraron materias</CommandEmpty>
                           <CommandGroup>
