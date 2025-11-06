@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -16,9 +17,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { ChevronDownIcon } from "lucide-react";
 
 type Periodo = { codigo: string; nombre: string };
-type Programa = { codigo: string; nombre: string };
+type Programa = { codigo: string; nombre: string; titulo?: string; sede?: string; label?: string };
 type Materia = { codigo: string; nombre: string };
 type Modalidad = { codigo: string; nombre: string };
 type Grupo = {
@@ -44,10 +60,13 @@ type Grupo = {
 export default function Home() {
   const [periodos, setPeriodos] = useState<Periodo[]>([]);
   const [periodo, setPeriodo] = useState<string>("");
+  const [periodoOpen, setPeriodoOpen] = useState(false);
   const [programas, setProgramas] = useState<Programa[]>([]);
   const [programa, setPrograma] = useState<string>("");
+  const [programaOpen, setProgramaOpen] = useState(false);
   const [materias, setMaterias] = useState<Materia[]>([]);
   const [materia, setMateria] = useState<string>("");
+  const [materiaOpen, setMateriaOpen] = useState(false);
   const [modalidades, setModalidades] = useState<Modalidad[]>([]);
   const [modalidad, setModalidad] = useState<string>("");
   const [grupos, setGrupos] = useState<Grupo[]>([]);
@@ -58,6 +77,16 @@ export default function Home() {
   const [loadingMod, setLoadingMod] = useState(false);
   const [loadingGpo, setLoadingGpo] = useState(false);
   const [error, setError] = useState<string>("");
+
+  const sedeBadgeClass = (s?: string) => {
+    const key = (s || "").toLowerCase();
+    if (key.includes("pasto")) return "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200 border-transparent";
+    if (key.includes("tumaco")) return "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-200 border-transparent";
+    if (key.includes("ipiales")) return "bg-violet-100 text-violet-900 dark:bg-violet-900/30 dark:text-violet-200 border-transparent";
+    if (key.includes("tuquerres")) return "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200 border-transparent";
+    if (key.includes("general")) return "bg-zinc-100 text-zinc-900 dark:bg-zinc-800/60 dark:text-zinc-200 border-transparent";
+    return "bg-secondary text-secondary-foreground";
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -180,50 +209,200 @@ export default function Home() {
             <div className="grid gap-4">
               <div className="grid gap-2">
                 <Label>Periodo</Label>
-                <Select value={periodo} onValueChange={onPeriodoChange} disabled={loadingP}>
-                  <SelectTrigger className="w-full h-auto min-h-9 items-start text-left">
-                    <SelectValue className="whitespace-normal wrap-break-word" placeholder="Seleccione un periodo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {periodos.map((p) => (
-                      <SelectItem key={p.codigo} value={p.codigo}>
-                        {p.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Mobile: Dialog + Command */}
+                <div className="block md:hidden">
+                  <Button
+                    variant="outline"
+                    onClick={() => setPeriodoOpen(true)}
+                    disabled={loadingP}
+                    className="w-full h-auto min-h-9 items-start justify-between text-left whitespace-normal wrap-break-word font-normal"
+                  >
+                    <span className="p-0">
+                      {periodo
+                        ? periodos.find((p) => p.codigo === periodo)?.nombre || "Periodo"
+                        : "Seleccione un periodo"}
+                    </span>
+                    <span className="text-muted-foreground"><ChevronDownIcon className="w-4 h-4" /></span>
+                  </Button>
+                  <Dialog open={periodoOpen} onOpenChange={setPeriodoOpen}>
+                    <DialogContent className="p-0 gap-0">
+                      <DialogHeader className="px-4 pt-4 pb-2">
+                        <DialogTitle>Seleccionar periodo</DialogTitle>
+                      </DialogHeader>
+                      <Command>
+                        <CommandInput placeholder="Buscar periodo..." />
+                        <CommandList>
+                          <CommandEmpty>No se encontraron periodos</CommandEmpty>
+                          <CommandGroup>
+                            {periodos.map((p, i) => (
+                              <CommandItem
+                                key={`${p.codigo}-${i}`}
+                                value={p.nombre}
+                                onSelect={() => {
+                                  setPeriodoOpen(false);
+                                  onPeriodoChange(p.codigo);
+                                }}
+                              >
+                                {p.nombre}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+                {/* Desktop: Select */}
+                <div className="hidden md:block">
+                </div>
               </div>
 
               <div className="grid gap-2">
                 <Label>Programa</Label>
-                <Select value={programa} onValueChange={onProgramaChange} disabled={!periodo || loadingG}>
-                  <SelectTrigger className="w-full h-auto min-h-9 items-start text-left">
-                    <SelectValue className="whitespace-normal wrap-break-word" placeholder="Seleccione un programa" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {programas.map((g) => (
-                      <SelectItem key={g.codigo} value={g.codigo}>
-                        {g.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Mobile: Dialog + Command */}
+                <div className="block md:hidden">
+                  <Button
+                    variant="outline"
+                    onClick={() => setProgramaOpen(true)}
+                    disabled={!periodo || loadingG}
+                    className="w-full h-auto min-h-9 items-start justify-between text-left whitespace-normal wrap-break-word font-normal"
+                  >
+                    <span className="p-0">
+                      {(() => {
+                        const sel = programas.find((g) => g.codigo === programa);
+                        return sel ? `${sel.codigo} - ${(sel.titulo || sel.nombre.replace(/\([^)]*\)/g, "").replace(/\s+-\s*/g, "-")).trim()}` : "Seleccione un programa";
+                      })()}
+                    </span>
+                    <span className="flex items-center gap-2 text-muted-foreground">
+                      {(() => {
+                        const sel = programas.find((g) => g.codigo === programa);
+                        const sede = sel?.sede;
+                        return sede ? (
+                          <Badge className={sedeBadgeClass(sede)}>{sede}</Badge>
+                        ) : null;
+                      })()}
+                      <ChevronDownIcon className="w-4 h-4" />
+                    </span>
+                  </Button>
+                  <Dialog open={programaOpen} onOpenChange={setProgramaOpen}>
+                    <DialogContent className="p-0 gap-0">
+                      <DialogHeader className="px-4 pt-4 pb-2">
+                        <DialogTitle>Seleccionar programa</DialogTitle>
+                      </DialogHeader>
+                      <Command>
+                        <CommandInput placeholder="Buscar programa..." />
+                        <CommandList>
+                          <CommandEmpty>No se encontraron programas</CommandEmpty>
+                          <CommandGroup>
+                            {programas.map((g, i) => (
+                              <CommandItem
+                                key={`${g.codigo}-${i}`}
+                                value={g.titulo || g.nombre}
+                                onSelect={() => {
+                                  setProgramaOpen(false);
+                                  onProgramaChange(g.codigo);
+                                }}
+                              >
+                                <div className="flex w-full items-center justify-between gap-2">
+                                  <span className="truncate">{g.codigo} - {g.titulo || g.nombre.replace(/\([^)]*\)/g, "").replace(/\s+-\s*/g, "-")}</span>
+                                  {g.sede ? (
+                                    <Badge className={sedeBadgeClass(g.sede)}>{g.sede}</Badge>
+                                  ) : null}
+                                </div>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+                {/* Desktop: Select */}
+                <div className="hidden md:block">
+                  <Select value={programa} onValueChange={onProgramaChange} disabled={!periodo || loadingG}>
+                    <SelectTrigger className="w-full h-auto min-h-9 items-start text-left">
+                      <div className="flex w-full items-start justify-between gap-2">
+                        <SelectValue className="whitespace-normal wrap-break-word md:line-clamp-2" placeholder="Seleccione un programa" />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {programas.map((g, i) => (
+                        <SelectItem key={`${g.codigo}-${i}`} value={g.codigo}>
+                          <div className="flex w-full items-center justify-between gap-2">
+                            <span className="truncate">
+                              {g.codigo} - {g.titulo || g.nombre.replace(/\([^)]*\)/g, "").replace(/\s+-\s*/g, "-")}
+                            </span>
+                            {g.sede ? (
+                              <Badge className={sedeBadgeClass(g.sede)}>{g.sede}</Badge>
+                            ) : null}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div className="grid gap-2">
                 <Label>Materia</Label>
-                <Select value={materia} onValueChange={onMateriaChange} disabled={!programa || loadingM}>
-                  <SelectTrigger className="w-full h-auto min-h-9 items-start text-left">
-                    <SelectValue className="whitespace-normal wrap-break-word" placeholder="Seleccione una materia" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {materias.map((m) => (
-                      <SelectItem key={m.codigo} value={m.codigo}>
-                        {m.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* Mobile: Dialog + Command */}
+                <div className="block md:hidden">
+                  <Button
+                    variant="outline"
+                    onClick={() => setMateriaOpen(true)}
+                    disabled={!programa || loadingM}
+                    className="w-full h-auto min-h-9 items-start justify-between text-left whitespace-normal wrap-break-word font-normal"
+                  >
+                    <span className="p-0">
+                      {materia
+                        ? materias.find((m) => m.codigo === materia)?.nombre || "Materia"
+                        : "Seleccione una materia"}
+                    </span>
+                    <span className="text-muted-foreground"><ChevronDownIcon className="w-4 h-4" /></span>
+                  </Button>
+                  <Dialog open={materiaOpen} onOpenChange={setMateriaOpen}>
+                    <DialogContent className="p-0 gap-0">
+                      <DialogHeader className="px-4 pt-4 pb-2">
+                        <DialogTitle>Seleccionar materia</DialogTitle>
+                      </DialogHeader>
+                      <Command>
+                        <CommandInput placeholder="Buscar materia..." />
+                        <CommandList>
+                          <CommandEmpty>No se encontraron materias</CommandEmpty>
+                          <CommandGroup>
+                            {materias.map((m, i) => (
+                              <CommandItem
+                                key={`${m.codigo}-${i}`}
+                                value={m.nombre}
+                                onSelect={() => {
+                                  setMateriaOpen(false);
+                                  onMateriaChange(m.codigo);
+                                }}
+                              >
+                                {m.nombre}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+                {/* Desktop: Select */}
+                <div className="hidden md:block">
+                  <Select value={materia} onValueChange={onMateriaChange} disabled={!programa || loadingM}>
+                    <SelectTrigger className="w-full h-auto min-h-9 items-start text-left">
+                      <SelectValue className="whitespace-normal wrap-break-word md:line-clamp-2" placeholder="Seleccione una materia" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {materias.map((m, i) => (
+                        <SelectItem key={`${m.codigo}-${i}`} value={m.codigo}>
+                          {m.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div className="grid gap-2">
@@ -233,8 +412,8 @@ export default function Home() {
                     <SelectValue className="whitespace-normal wrap-break-word" placeholder="Seleccione una modalidad" />
                   </SelectTrigger>
                   <SelectContent>
-                    {modalidades.map((mo) => (
-                      <SelectItem key={mo.codigo} value={mo.codigo}>
+                    {modalidades.map((mo, i) => (
+                      <SelectItem key={`${mo.codigo}-${i}`} value={mo.codigo}>
                         {mo.nombre}
                       </SelectItem>
                     ))}
@@ -252,7 +431,7 @@ export default function Home() {
                   <div className="text-sm text-muted-foreground">No hay grupos disponibles</div>
                 ) : (
                   <div className="grid gap-2">
-                    {grupos.map((gr) => {
+                    {grupos.map((gr, i) => {
                       const selected = grupo === gr.codigo;
                       const titulo = gr.grupo ? `G${gr.grupo}` : `G${gr.codigo}`;
                       const horarioFull = gr.mergedSlots?.length
@@ -260,7 +439,7 @@ export default function Home() {
                         : gr.horario?.join(" • ") || "";
                       return (
                         <Card
-                          key={gr.codigo}
+                          key={`${gr.codigo}-${i}`}
                           data-selected={selected}
                           onClick={() => setGrupo(gr.codigo)}
                           className={`cursor-pointer transition-shadow p-0 ${selected ? "border-ring ring-2 ring-ring/50" : "hover:shadow-sm"}`}
