@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Card,
@@ -32,6 +32,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { ChevronDownIcon, Loader2 } from "lucide-react";
+import Timetable, { TimetableEntry } from "@/components/Timetable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 
@@ -58,6 +59,10 @@ type Grupo = {
   docentes?: string;
   label?: string;
   modalidadId?: string;
+  programId?: string;
+  periodId?: string;
+  materiaId?: string;
+  materiaName?: string;
 };
 
 export default function Home() {
@@ -82,6 +87,19 @@ export default function Home() {
   const [error, setError] = useState<string>("");
   const [grupoSortKey, setGrupoSortKey] = useState<"grupo"|"sede"|"dia"|"ocupacion"|"docente">("grupo");
   const [grupoSortDir, setGrupoSortDir] = useState<"asc"|"desc">("asc");
+  const [viewMode, setViewMode] = useState<"lista"|"horario">("lista");
+  const leftColRef = useRef<HTMLDivElement | null>(null);
+  const rightColRef = useRef<HTMLDivElement | null>(null);
+  const [matchLeftHeight, setMatchLeftHeight] = useState<number | null>(null);
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [selectedGrupoIds, setSelectedGrupoIds] = useState<string[]>([]);
+  const [selectedGroupsMap, setSelectedGroupsMap] = useState<Record<string, Grupo>>({});
+  const [showDay, setShowDay] = useState(false);
+  const [showHours, setShowHours] = useState(true);
+  const [showTeacher, setShowTeacher] = useState(true);
+  const [showCupos, setShowCupos] = useState(false);
+  const [showLugar, setShowLugar] = useState(true);
+  const [fontScale, setFontScale] = useState(1);
 
   const sedeBadgeClass = (s?: string) => {
     const key = (s || "").toLowerCase();
@@ -92,6 +110,249 @@ export default function Home() {
     if (key.includes("general")) return "bg-zinc-100 text-zinc-900 dark:bg-zinc-800/60 dark:text-zinc-200 border-zinc-300";
     return "bg-secondary text-secondary-foreground";
   };
+
+  const groupKey = (g: Grupo) => {
+    // Composite key with full context to avoid colisiones entre materias/modalidades
+    return `${g.periodId || periodo}|${g.programId || programa}|${g.materiaId || materia}|${g.modalidadId || ''}|${g.codigo}`;
+  };
+  const isGrupoSelected = (key: string) => selectedGrupoIds.includes(key);
+  const toggleGrupoSelected = (g: Grupo) => {
+    const key = groupKey(g);
+    setSelectedGrupoIds((prev) => prev.includes(key) ? prev.filter(x => x !== key) : [...prev, key]);
+    setSelectedGroupsMap((prev) => {
+      const next = { ...prev } as Record<string, Grupo>;
+      if (key in next) {
+        delete next[key];
+      } else {
+        next[key] = g;
+      }
+      return next;
+    });
+  };
+
+  // Persist/restore selection
+  useEffect(() => {
+    try {
+      const ids = JSON.parse(localStorage.getItem('selectedGrupoIdsV2') || '[]');
+      const map = JSON.parse(localStorage.getItem('selectedGroupsMapV2') || '{}');
+      if (Array.isArray(ids)) setSelectedGrupoIds(ids);
+      if (map && typeof map === 'object') setSelectedGroupsMap(map);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem('selectedGrupoIdsV2', JSON.stringify(selectedGrupoIds));
+      localStorage.setItem('selectedGroupsMapV2', JSON.stringify(selectedGroupsMap));
+    } catch {}
+  }, [selectedGrupoIds, selectedGroupsMap]);
+
+  // Track breakpoint and sync right column height to left on desktop
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(min-width: 768px)");
+    const handle = () => setIsDesktop(mq.matches);
+    handle();
+    mq.addEventListener("change", handle);
+    return () => mq.removeEventListener("change", handle);
+  }, []);
+
+  useEffect(() => {
+    if (!isDesktop) {
+      setMatchLeftHeight(null);
+      return;
+    }
+    const measure = () => {
+      const h = leftColRef.current?.offsetHeight || null;
+      setMatchLeftHeight(h);
+    };
+    measure();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => measure());
+      if (leftColRef.current) ro.observe(leftColRef.current);
+    }
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      if (ro) ro.disconnect();
+    };
+  }, [isDesktop]);
+
+  function hourToMinutes(hh: string, ampm?: string) {
+    let h = parseInt(hh, 10);
+    if (!isFinite(h)) return 0;
+    if (ampm) {
+      const ap = ampm.toUpperCase();
+      if (ap === 'PM' && h < 12) h += 12;
+      if (ap === 'AM' && h === 12) h = 0;
+    }
+    return h * 60;
+  }
+
+  function parseHM(val: string | undefined): [number, number] {
+    const s = String(val || '').trim();
+    const m = s.match(/^(\d{1,2})(?::(\d{2}))?$/);
+    if (!m) return [parseInt(s || '0', 10) || 0, 0];
+    const h = parseInt(m[1] || '0', 10) || 0;
+    const mm = parseInt(m[2] || '0', 10) || 0;
+    return [h, mm];
+  }
+
+  function parseRangeMinutes(desde: string, hasta: string, label?: string, defaultAmpm?: string): { start: number; end: number } {
+    const clean = (s: string) => String(s || '').trim();
+    const L = clean(label || '');
+    const durMatch = L.match(/\((\d+)\s*horas?\)/i);
+    // 1) Prefer explicit desde/hasta when defaultAmpm is provided
+    if (defaultAmpm) {
+      const [sh, sm] = parseHM(clean(desde));
+      const [eh, em] = parseHM(clean(hasta));
+      const ap = defaultAmpm.toUpperCase();
+      let start = hourToMinutes(String(sh), ap) + sm;
+      let end = hourToMinutes(String(eh), ap) + em;
+      if (ap === 'PM' && end <= start) {
+        // Typical case: 9-1 with PM means 9AM-1PM
+        start = hourToMinutes(String(sh), 'AM') + sm;
+      }
+      if (ap === 'AM' && end <= start) {
+        // Typical case: 11-1 with AM means 11AM-1PM
+        end = hourToMinutes(String(eh), 'PM') + em;
+      }
+      if (durMatch && end <= start) {
+        const dh = parseInt(durMatch[1], 10);
+        if (isFinite(dh) && dh > 0) end = start + dh * 60;
+      }
+      return { start, end };
+    }
+    // 2) Label-based parsing
+    // Case: both AM/PM present
+    const mBoth = L.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\s*-\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+    if (mBoth) {
+      const sh = parseInt(mBoth[1] || '0', 10); const sm = parseInt(mBoth[2] || '0', 10);
+      const eh = parseInt(mBoth[4] || '0', 10); const em = parseInt(mBoth[5] || '0', 10);
+      const sap = mBoth[3].toUpperCase(); const eap = mBoth[6].toUpperCase();
+      const start = hourToMinutes(String(sh), sap) + sm;
+      const end = hourToMinutes(String(eh), eap) + em;
+      return { start, end };
+    }
+    // Case: only end AM/PM present (e.g., "9-1PM")
+    const mEnd = L.match(/(\d{1,2})(?::(\d{2}))?\s*-\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+    if (mEnd) {
+      const sh = parseInt(mEnd[1] || '0', 10); const sm = parseInt(mEnd[2] || '0', 10);
+      const eh = parseInt(mEnd[3] || '0', 10); const em = parseInt(mEnd[4] || '0', 10);
+      const eap = mEnd[5].toUpperCase();
+      // Infer start AM/PM: if end is PM and start > end => start is AM (e.g., 9-1PM => 9AM-1PM), else same as end
+      const sap = (eap === 'PM' && sh > eh) ? 'AM' : eap;
+      const start = hourToMinutes(String(sh), sap) + sm;
+      const end = hourToMinutes(String(eh), eap) + em;
+      return { start, end };
+    }
+    // Case: no AM/PM but plain range in label, e.g., "9-11" or "9:30-11:15"
+    const mNoAp = L.match(/(\d{1,2})(?::(\d{2}))?\s*-\s*(\d{1,2})(?::(\d{2}))?/);
+    if (mNoAp) {
+      const sh = parseInt(mNoAp[1] || '0', 10); const sm = parseInt(mNoAp[2] || '0', 10);
+      const eh = parseInt(mNoAp[3] || '0', 10); const em = parseInt(mNoAp[4] || '0', 10);
+      const ap = (defaultAmpm || '').toUpperCase();
+      let start: number;
+      let end: number;
+      if (ap === 'AM' || ap === 'PM') {
+        start = hourToMinutes(String(sh), ap) + sm;
+        end = hourToMinutes(String(eh), ap) + em;
+        if (ap === 'PM' && end <= start) {
+          // If PM and end <= start, assume start was AM (rare). Fallback to raw hours to avoid midnight.
+          start = sh * 60 + sm;
+          end = eh * 60 + em;
+        }
+      } else {
+        // No AM/PM context: treat as 24h-style within daytime
+        start = sh * 60 + sm;
+        end = eh * 60 + em;
+      }
+      if (durMatch && (!defaultAmpm || !/AM|PM/i.test(defaultAmpm))) {
+        const dh = parseInt(durMatch[1], 10);
+        if (isFinite(dh) && dh > 0) end = start + dh * 60;
+      }
+      return { start, end };
+    }
+    // 3) Fallback: no AM/PM anywhere; use desde/hasta literally
+    const [sh, sm] = parseHM(clean(desde));
+    const [eh, em] = parseHM(clean(hasta));
+    const start = sh * 60 + sm;
+    let end = eh * 60 + em;
+    if (durMatch && end <= start) {
+      const dh = parseInt(durMatch[1], 10);
+      if (isFinite(dh) && dh > 0) end = start + dh * 60;
+    }
+    return { start, end };
+  }
+
+  const timetableEntries: TimetableEntry[] = (() => {
+    type Raw = { id: string; day: string; startMin: number; endMin: number; title: string; subtitle?: string; color: string; materiaKey: string; teacher?: string; cupos?: string; location?: string };
+    const raws: Raw[] = [];
+    const sel = new Set(selectedGrupoIds);
+    const palette = ["#60a5fa","#f59e0b","#34d399","#f472b6","#a78bfa","#f87171","#22d3ee","#84cc16"]; // sky, amber, emerald, pink, violet, red, cyan, lime
+    const colorFor = (key: string) => { let hash = 0; for (let i=0;i<key.length;i++) hash = (hash*31 + key.charCodeAt(i))|0; const idx = Math.abs(hash) % palette.length; return palette[idx]; };
+    const normalize = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+    for (const key of sel) {
+      const g = selectedGroupsMap[key];
+      if (!g) continue;
+      const slots = (g.parsedSlots && g.parsedSlots.length ? g.parsedSlots : []).slice();
+      const materiaKey = `${g.periodId}|${g.programId}|${g.materiaId}`; // Color por materia, estable
+      const color = colorFor(materiaKey);
+      const modName = normalize((modalidades.find(m => m.codigo === g.modalidadId)?.nombre) || "");
+      const isTeo = modName.includes("teor") || modName.startsWith("teo") || (g.modalidadId || "").toLowerCase() === "t";
+      const isPra = modName.includes("prac") || modName.includes("laboratorio") || modName.includes("lab") || ["p","l"].includes((g.modalidadId || "").toLowerCase());
+      const modLetter = isTeo ? 'T' : (isPra ? 'P' : '');
+      for (const s of slots) {
+        const { start: startMin, end: endMin } = parseRangeMinutes(s.desde, s.hasta, s.label, s.ampm);
+        if (!(endMin > startMin)) continue;
+        const day = s.dia;
+        const groupText = g.grupo ? `G${g.grupo}` : `G${g.codigo}`;
+        const materiaName = g.materiaName || materias.find(mm => mm.codigo === g.materiaId)?.nombre || '';
+        const title = modLetter ? `[${modLetter}] ${groupText} - ${materiaName}` : `${groupText} - ${materiaName}`;
+        const subtitle = g.docentes || g.sede || undefined;
+        const location = s.aula || (() => { const m = (s.label || '').match(/\(([^)]+)\)/); return m ? m[1] : undefined; })();
+        raws.push({ id: `${key}-${day}-${s.desde}-${s.hasta}`, day, startMin, endMin, title, subtitle, color, materiaKey, teacher: g.docentes, cupos: g.ocupacion, location });
+      }
+    }
+    // Compactar: unir bloques consecutivos/solapados por mismo día y misma materia
+    const byDayMateria: Record<string, Raw[]> = {};
+    for (const r of raws) {
+      const k = `${r.day}|${r.materiaKey}`;
+      (byDayMateria[k] ||= []).push(r);
+    }
+    const merged: Raw[] = [];
+    for (const k in byDayMateria) {
+      const arr = byDayMateria[k].sort((a,b)=> a.startMin - b.startMin || a.endMin - b.endMin);
+      let cur: Raw | null = null;
+      for (const ev of arr) {
+        if (!cur) { cur = { ...ev }; continue; }
+        // Merge if overlapping or adjacent (<= 5 min gap)
+        if (ev.startMin <= cur.endMin + 5) {
+          cur.endMin = Math.max(cur.endMin, ev.endMin);
+          // Mantener título del primero (compacto). Combinar docentes/cupos si son distintos.
+          if (ev.teacher && ev.teacher !== cur.teacher) {
+            const a = new Set(String(cur.teacher || '').split(' · ').filter(Boolean));
+            String(ev.teacher).split(' · ').filter(Boolean).forEach(t => a.add(t));
+            cur.teacher = Array.from(a).join(' · ');
+          }
+          if (ev.cupos && ev.cupos !== cur.cupos) {
+            const a = new Set(String(cur.cupos || '').split(' / ').filter(Boolean));
+            String(ev.cupos).split(' / ').filter(Boolean).forEach(t => a.add(t));
+            cur.cupos = Array.from(a).join(' / ');
+          }
+          if (ev.location && ev.location !== cur.location) {
+            const a = new Set(String(cur.location || '').split(' · ').filter(Boolean));
+            String(ev.location).split(' · ').filter(Boolean).forEach(t => a.add(t));
+            cur.location = Array.from(a).join(' · ');
+          }
+        } else {
+          merged.push(cur); cur = { ...ev };
+        }
+      }
+      if (cur) merged.push(cur);
+    }
+    return merged.map(m => ({ id: m.id, day: m.day, startMin: m.startMin, endMin: m.endMin, title: m.title, subtitle: m.subtitle, color: m.color, teacher: m.teacher, cupos: m.cupos, location: m.location }));
+  })();
 
   const refreshGrupos = async () => {
     if (!periodo || !programa || !materia) return;
@@ -104,7 +365,8 @@ export default function Home() {
         const res = await fetch(`/api/grupos?${params.toString()}` , { cache: 'no-store' });
         const data = await res.json();
         if (Array.isArray(data.grupos)) {
-          results.push(...data.grupos.map((g: Grupo) => ({ ...g, modalidadId: mid })));
+          const mName = materias.find(m => m.codigo === materia)?.nombre;
+          results.push(...data.grupos.map((g: Grupo) => ({ ...g, modalidadId: mid, periodId: periodo, programId: programa, materiaId: materia, materiaName: mName })));
         }
       }
       setGrupos(results);
@@ -313,7 +575,8 @@ export default function Home() {
         const res = await fetch(`/api/grupos?${params.toString()}`);
         const data = await res.json();
         if (Array.isArray(data.grupos)) {
-          results.push(...data.grupos.map((g: Grupo) => ({ ...g, modalidadId: mid })));
+          const mName = materias.find(m => m.codigo === materia)?.nombre;
+          results.push(...data.grupos.map((g: Grupo) => ({ ...g, modalidadId: mid, periodId: periodo, programId: programa, materiaId: materia, materiaName: mName })));
         }
       }
       setGrupos(results);
@@ -325,14 +588,15 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen w-full bg-zinc-50 text-zinc-900 dark:bg-black dark:text-zinc-50">
-      <div className="mx-auto max-w-3xl p-3">
+    <div className="min-h-screen w-full overflow-x-hidden bg-zinc-50 text-zinc-900 dark:bg-black dark:text-zinc-50">
+      <div className="mx-auto max-w-7xl p-3">
         <Card className="p-3 gap-0">
           <CardHeader className="p-1">
             <CardTitle>Consulta de Cupos - UdeCupos</CardTitle>
           </CardHeader>
           <CardContent className="p-1">
-            <div className="grid gap-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div ref={leftColRef} className="pr-2">
               <div className="grid gap-2">
                 <Label>Periodo</Label>
                 {loadingP ? (
@@ -571,20 +835,26 @@ export default function Home() {
               </div>
               {selectedModalidades.length ? (
                 <div className="text-xs text-muted-foreground">
-                  Modalidades seleccionadas: {selectedModalidades.map((id) => modalidades.find((m) => m.codigo === id)?.nombre || id).join(', ')}
+                  <div className="font-normal">Modalidades seleccionadas: {selectedModalidades.map((id) => modalidades.find((m) => m.codigo === id)?.nombre || id).join(', ')}</div>
                 </div>
               ) : null}
+              </div>
+              <div
+                ref={rightColRef}
+                className="pl-2"
+                style={isDesktop && matchLeftHeight ? { maxHeight: matchLeftHeight, overflowY: "auto" } : undefined}
+              >
 
               <div className="grid gap-2">
                 <Label>Grupo (horario)</Label>
                 <div className="text-xs">
                   <div className="text-muted-foreground mb-1">Ordenar por:</div>
-                  <div className="flex flex-col md:flex-row md:items-center gap-2">
+                  <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
                     <Select
                       value={grupoSortKey}
                       onValueChange={(v) => setGrupoSortKey(v as "grupo"|"sede"|"dia"|"ocupacion"|"docente")}
                     >
-                      <SelectTrigger className="h-10 w-full md:h-8 md:w-[200px]"><SelectValue placeholder="Campo" /></SelectTrigger>
+                      <SelectTrigger className="h-10 w-full sm:h-9 sm:w-[200px]"><SelectValue placeholder="Campo" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="grupo">Número de grupo</SelectItem>
                         <SelectItem value="sede">Sede</SelectItem>
@@ -597,13 +867,20 @@ export default function Home() {
                       value={grupoSortDir}
                       onValueChange={(v) => setGrupoSortDir(v as "asc"|"desc")}
                     >
-                      <SelectTrigger className="h-10 w-full md:h-8 md:w-[160px]"><SelectValue placeholder="Dirección" /></SelectTrigger>
+                      <SelectTrigger className="h-10 w-full sm:h-9 sm:w-[160px]"><SelectValue placeholder="Dirección" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="asc">Ascendente</SelectItem>
                         <SelectItem value="desc">Descendente</SelectItem>
                       </SelectContent>
                     </Select>
-                    <div className="flex-1" />
+                    <div className="sm:flex-1" />
+                    <Button
+                      variant="outline"
+                      onClick={() => document.getElementById('horario')?.scrollIntoView({ behavior: 'smooth' })}
+                      className="h-8"
+                    >
+                      Ver horario
+                    </Button>
                     {selectedModalidades.length > 0 ? (
                       <Button
                         variant="outline"
@@ -624,6 +901,19 @@ export default function Home() {
                   <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Cargando grupos...</div>
                 ) : selectedModalidades.length === 0 ? (
                   <div className="text-sm text-muted-foreground">Seleccione una modalidad</div>
+                ) : viewMode === "horario" ? (
+                  <div className="grid gap-2">
+                    {selectedGrupoIds.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">Seleccione uno o más grupos para verlos en el horario</div>
+                    ) : null}
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">Grupos seleccionados: {selectedGrupoIds.length}</Badge>
+                      {selectedGrupoIds.length > 0 ? (
+                        <Button variant="outline" size="sm" onClick={() => { setSelectedGrupoIds([]); setSelectedGroupsMap({}); }}>Limpiar</Button>
+                      ) : null}
+                    </div>
+                    <Timetable entries={timetableEntries} startHour={7} endHour={22} />
+                  </div>
                 ) : grupos.length === 0 ? (
                   <div className="text-sm text-muted-foreground">No hay grupos disponibles</div>
                 ) : (
@@ -649,13 +939,13 @@ export default function Home() {
                           <div className="text-xs font-semibold text-muted-foreground uppercase mb-1">{nombre}</div>
                           <div className="grid grid-cols-1 gap-2">
                             {list.map((gr, i) => {
+                              const key = groupKey(gr);
                               const selected = grupo === gr.codigo;
                               const titulo = gr.grupo ? `G${gr.grupo}` : `G${gr.codigo}`;
                               return (
                                 <Card
                                   key={`${gr.codigo}-${i}`}
                                   data-selected={selected}
-                                  onClick={() => setGrupo(gr.codigo)}
                                   className={`cursor-pointer transition-shadow p-0 ${selected ? "border-ring ring-2 ring-ring/50" : "hover:shadow-sm"}`}
                                 >
                                   <CardContent className="p-3">
@@ -673,6 +963,12 @@ export default function Home() {
                                           {gr.ocupacion}
                                         </Badge>
                                       ) : null}
+                                    </div>
+                                    <div className="mt-2 flex items-center gap-2">
+                                      <Button size="sm" variant={isGrupoSelected(key) ? "default" : "outline"} onClick={() => toggleGrupoSelected({ ...gr, periodId: periodo, programId: programa, materiaId: materia })}>
+                                        {isGrupoSelected(key) ? "Quitar del horario" : "Agregar al horario"}
+                                      </Button>
+                                      <Button size="sm" variant="outline" onClick={() => setGrupo(gr.codigo)}>Seleccionar</Button>
                                     </div>
                                     {(() => {
                                       const labels = gr.mergedSlots?.length ? gr.mergedSlots : (gr.horario || []);
@@ -716,9 +1012,45 @@ export default function Home() {
               {error ? (
                 <div className="text-sm text-red-600 dark:text-red-400">{error}</div>
               ) : null}
+              </div>
             </div>
           </CardContent>
         </Card>
+        {/* Segunda fila: Horario a pantalla completa */}
+        <div id="horario" className="mt-4">
+          <Card className="flex flex-col">
+            <CardHeader className="p-2">
+              <CardTitle>Mi Horario</CardTitle>
+            </CardHeader>
+            <CardContent className="p-2 flex flex-col gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="outline">Grupos seleccionados: {selectedGrupoIds.length}</Badge>
+                {selectedGrupoIds.length > 0 ? (
+                  <Button variant="outline" size="sm" onClick={() => { setSelectedGrupoIds([]); setSelectedGroupsMap({}); }}>Limpiar</Button>
+                ) : null}
+                <div className="flex items-center gap-1 ml-2 text-xs">
+                  <span className="text-muted-foreground">Mostrar:</span>
+                  <Button size="sm" variant={showTeacher ? "default" : "outline"} onClick={() => setShowTeacher(v=>!v)}>Docente</Button>
+                  <Button size="sm" variant={showCupos ? "default" : "outline"} onClick={() => setShowCupos(v=>!v)}>Cupos</Button>
+                  <Button size="sm" variant={showDay ? "default" : "outline"} onClick={() => setShowDay(v=>!v)}>Día</Button>
+                  <Button size="sm" variant={showHours ? "default" : "outline"} onClick={() => setShowHours(v=>!v)}>Horas</Button>
+                  <Button size="sm" variant={showLugar ? "default" : "outline"} onClick={() => setShowLugar(v=>!v)}>Lugar</Button>
+                </div>
+                <div className="flex items-center gap-1 ml-2 text-xs">
+                  <span className="text-muted-foreground">Tamaño:</span>
+                  <Button size="sm" variant="outline" onClick={() => setFontScale(v=>Math.max(0.75, +(v-0.1).toFixed(2)))}>A-</Button>
+                  <Button size="sm" variant="outline" onClick={() => setFontScale(v=>Math.min(1.75, +(v+0.1).toFixed(2)))}>A+</Button>
+                </div>
+                <div className="ml-auto">
+                  <Button variant="outline" size="sm" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Volver arriba</Button>
+                </div>
+              </div>
+              <div>
+                <Timetable entries={timetableEntries} startHour={7} endHour={22} options={{ showDay, showHours, showTeacher, showCupos, showLugar, fontScale }} />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );
