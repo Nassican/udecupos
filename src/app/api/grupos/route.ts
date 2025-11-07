@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { http } from '../../../lib/http';
+import { getCache, setCache } from '../../../lib/cache';
 import iconv from 'iconv-lite';
 import { load } from 'cheerio';
 
@@ -37,7 +38,12 @@ type ParsedGrupo = {
   mergedSlots?: string[];
 };
 
-async function fetchGrupos(modalidadId: string, periodId: string, programId: string, materiaId: string, scriptInit?: string) {
+async function fetchGrupos(modalidadId: string, periodId: string, programId: string, materiaId: string, scriptInit?: string, forceRefresh?: boolean) {
+  const cacheKey = `grupos:${modalidadId}:${periodId}:${programId}:${materiaId}:${scriptInit || ''}`;
+  if (!forceRefresh) {
+    const cached = getCache<{ grupos: Array<{ codigo: string; nombre: string }> }>(cacheKey);
+    if (cached) return NextResponse.json(cached, { headers: { 'Cache-Control': 'public, max-age=300', 'X-Cache': 'HIT' } });
+  }
   const form = new URLSearchParams();
   form.append('rs', 'ajax_Cupos_estudiantes_refresh_tipo_modalidad');
   form.append('rst', '');
@@ -180,7 +186,9 @@ async function fetchGrupos(modalidadId: string, periodId: string, programId: str
     .get()
     .filter(Boolean);
 
-  return NextResponse.json({ grupos });
+  const out = { grupos };
+  setCache(cacheKey, out);
+  return NextResponse.json(out, { headers: { 'Cache-Control': 'public, max-age=300', 'X-Cache': 'MISS' } });
 }
 
 export async function GET(req: Request) {
@@ -190,10 +198,14 @@ export async function GET(req: Request) {
   const programId = searchParams.get('programId');
   const materiaId = searchParams.get('materiaId');
   const scriptInit = searchParams.get('scriptInit') || undefined;
+  const forceRefresh = (() => {
+    const r = (searchParams.get('refresh') || '').toLowerCase();
+    return r === '1' || r === 'true';
+  })();
   if (!modalidadId || !periodId || !programId || !materiaId) {
     return NextResponse.json({ error: 'Faltan modalidadId, periodId, programId o materiaId' }, { status: 400 });
   }
-  return fetchGrupos(modalidadId, periodId, programId, materiaId, scriptInit);
+  return fetchGrupos(modalidadId, periodId, programId, materiaId, scriptInit, forceRefresh);
 }
 
 export async function POST(req: Request) {

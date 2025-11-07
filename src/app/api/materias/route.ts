@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { http } from '../../../lib/http';
+import { getCache, setCache } from '../../../lib/cache';
 import iconv from 'iconv-lite';
 import { load } from 'cheerio';
 
@@ -25,6 +26,9 @@ type AjaxPayload = {
 };
 
 async function fetchMaterias(programId: string, periodId: string) {
+  const cacheKey = `materias:${programId}:${periodId}`;
+  const cached = getCache<{ materias: Array<{ codigo: string; nombre: string; titulo?: string; label?: string }> }>(cacheKey);
+  if (cached) return NextResponse.json(cached, { headers: { 'Cache-Control': 'public, max-age=300', 'X-Cache': 'HIT' } });
   const form = new URLSearchParams();
   form.append('rs', 'ajax_Cupos_estudiantes_refresh_cod_carrera_cam');
   form.append('rst', '');
@@ -81,7 +85,9 @@ async function fetchMaterias(programId: string, periodId: string) {
     .get()
     .filter(Boolean);
 
-  return NextResponse.json({ materias });
+  const out = { materias };
+  setCache(cacheKey, out);
+  return NextResponse.json(out, { headers: { 'Cache-Control': 'public, max-age=300', 'X-Cache': 'MISS' } });
 }
 
 export async function GET(req: Request) {

@@ -31,7 +31,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, Loader2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 
@@ -91,6 +91,28 @@ export default function Home() {
     if (key.includes("tuquerres")) return "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200 border-amber-300";
     if (key.includes("general")) return "bg-zinc-100 text-zinc-900 dark:bg-zinc-800/60 dark:text-zinc-200 border-zinc-300";
     return "bg-secondary text-secondary-foreground";
+  };
+
+  const refreshGrupos = async () => {
+    if (!periodo || !programa || !materia) return;
+    if (selectedModalidades.length === 0) return;
+    try {
+      setLoadingGpo(true);
+      const results: Grupo[] = [];
+      for (const mid of selectedModalidades) {
+        const params = new URLSearchParams({ modalidadId: mid, periodId: periodo, programId: programa, materiaId: materia, refresh: '1' });
+        const res = await fetch(`/api/grupos?${params.toString()}` , { cache: 'no-store' });
+        const data = await res.json();
+        if (Array.isArray(data.grupos)) {
+          results.push(...data.grupos.map((g: Grupo) => ({ ...g, modalidadId: mid })));
+        }
+      }
+      setGrupos(results);
+    } catch {
+      setError("No se pudieron cargar los grupos");
+    } finally {
+      setLoadingGpo(false);
+    }
   };
 
   const dayOrder: Record<string, number> = { Lunes:1, Martes:2, Miércoles:3, Miercoles:3, Jueves:4, Viernes:5, Sábado:6, Sabado:6, Domingo:7 };
@@ -221,11 +243,7 @@ export default function Home() {
     if (!value) return;
     try {
       setLoadingG(true);
-      const res = await fetch(`/api/programas`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ periodId: value })
-      });
+      const res = await fetch(`/api/programas?periodId=${encodeURIComponent(value)}`);
       const data = await res.json();
       setProgramas(data.programas || []);
     } catch {
@@ -244,11 +262,8 @@ export default function Home() {
     if (!value || !periodo) return;
     try {
       setLoadingM(true);
-      const res = await fetch(`/api/materias`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ programId: value, periodId: periodo })
-      });
+      const params = new URLSearchParams({ programId: value, periodId: periodo });
+      const res = await fetch(`/api/materias?${params.toString()}`);
       const data = await res.json();
       setMaterias(data.materias || []);
     } catch {
@@ -267,11 +282,8 @@ export default function Home() {
     if (!value || !periodo || !programa) return;
     try {
       setLoadingMod(true);
-      const res = await fetch(`/api/modalidades`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ materiaId: value, programId: programa, periodId: periodo })
-      });
+      const params = new URLSearchParams({ materiaId: value, programId: programa, periodId: periodo });
+      const res = await fetch(`/api/modalidades?${params.toString()}`);
       const data = await res.json();
       setModalidades(data.modalidades || []);
     } catch {
@@ -297,12 +309,8 @@ export default function Home() {
       setLoadingGpo(true);
       const results: Grupo[] = [];
       for (const mid of next) {
-        // Fetch grupos por cada modalidad seleccionada y combinar
-        const res = await fetch(`/api/grupos`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ modalidadId: mid, periodId: periodo, programId: programa, materiaId: materia })
-        });
+        const params = new URLSearchParams({ modalidadId: mid, periodId: periodo, programId: programa, materiaId: materia });
+        const res = await fetch(`/api/grupos?${params.toString()}`);
         const data = await res.json();
         if (Array.isArray(data.grupos)) {
           results.push(...data.grupos.map((g: Grupo) => ({ ...g, modalidadId: mid })));
@@ -327,6 +335,9 @@ export default function Home() {
             <div className="grid gap-4">
               <div className="grid gap-2">
                 <Label>Periodo</Label>
+                {loadingP ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Cargando periodos...</div>
+                ) : null}
                 {/* Mobile: Dialog + Command */}
                 <div className="block md:hidden">
                   <Button
@@ -476,7 +487,7 @@ export default function Home() {
               <div className="grid gap-2">
                 <Label>Materia</Label>
                 {loadingM ? (
-                  <div className="text-sm text-muted-foreground">Cargando materias...</div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Cargando materias...</div>
                 ) : !programa ? (
                   <div className="text-sm text-muted-foreground">Seleccione un programa</div>
                 ) : materias.length === 0 ? (
@@ -528,7 +539,7 @@ export default function Home() {
               <div className="grid gap-2">
                 <Label>Modalidad</Label>
                 {loadingMod ? (
-                  <div className="text-sm text-muted-foreground">Cargando modalidades...</div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Cargando modalidades...</div>
                 ) : !materia ? (
                   <div className="text-sm text-muted-foreground">Seleccione una materia</div>
                 ) : modalidades.length === 0 ? (
@@ -592,16 +603,31 @@ export default function Home() {
                         <SelectItem value="desc">Descendente</SelectItem>
                       </SelectContent>
                     </Select>
+                    <div className="flex-1" />
+                    {selectedModalidades.length > 0 ? (
+                      <Button
+                        variant="outline"
+                        onClick={refreshGrupos}
+                        disabled={loadingGpo}
+                        className="h-8"
+                      >
+                        {loadingGpo ? (
+                          <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Actualizando…</span>
+                        ) : (
+                          <span>Actualizar grupos</span>
+                        )}
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
                 {loadingGpo ? (
-                  <div className="text-sm text-muted-foreground">Cargando grupos...</div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Cargando grupos...</div>
                 ) : selectedModalidades.length === 0 ? (
                   <div className="text-sm text-muted-foreground">Seleccione una modalidad</div>
                 ) : grupos.length === 0 ? (
                   <div className="text-sm text-muted-foreground">No hay grupos disponibles</div>
                 ) : (
-                  <div className="grid gap-4">
+                  <div className="grid gap-4 grid-cols-1">
                     {[...selectedModalidades]
                       .sort((a,b)=>{
                         const pa = getModalidadPriority(a);
@@ -619,9 +645,9 @@ export default function Home() {
                       const list = sortedGrupos.filter((g) => g.modalidadId === mid);
                       if (!list.length) return null;
                       return (
-                        <div key={mid}>
+                        <div key={mid} className="min-w-0">
                           <div className="text-xs font-semibold text-muted-foreground uppercase mb-1">{nombre}</div>
-                          <div className="grid gap-2">
+                          <div className="grid grid-cols-1 gap-2">
                             {list.map((gr, i) => {
                               const selected = grupo === gr.codigo;
                               const titulo = gr.grupo ? `G${gr.grupo}` : `G${gr.codigo}`;
@@ -662,9 +688,9 @@ export default function Home() {
                                       }
                                       const entries = Array.from(byDay.entries());
                                       return entries.length ? (
-                                        <div className="mt-1 flex gap-1 overflow-x-auto whitespace-nowrap">
+                                        <div className="mt-1 grid gap-1 grid-cols-1 sm:grid-cols-2">
                                           {entries.map(([d, segs]) => (
-                                            <Badge key={d} className={`${dayBadgeClass(d)} inline-flex whitespace-nowrap`}>
+                                            <Badge key={d} className={`${dayBadgeClass(d)} w-full justify-start`}>
                                               {d}
                                               {segs.length ? `: ${segs.join(" · ")}` : ""}
                                             </Badge>
