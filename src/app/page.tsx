@@ -26,7 +26,9 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { ChevronDownIcon, Loader2, Plus, Minus } from "lucide-react";
+import { ChevronDownIcon, Loader2 } from "lucide-react";
+import MostrarControls from "@/components/MostrarControls";
+import GroupCard from "@/components/GroupCard";
 import Timetable, { TimetableEntry } from "@/components/Timetable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -105,7 +107,6 @@ export default function Home() {
   const [showLugar, setShowLugar] = useState(false);
   const [fontScale, setFontScale] = useState(1);
   const [showTimetable, setShowTimetable] = useState(false);
-  const [mostrarOpen, setMostrarOpen] = useState(false);
 
   const sedeBadgeClass = (s?: string) => {
     const key = (s || "").toLowerCase();
@@ -1349,122 +1350,27 @@ export default function Home() {
                                 {list.map((gr, i) => {
                                   const key = groupKey(gr);
                                   const selected = grupo === gr.codigo;
-                                  const titulo = gr.grupo
-                                    ? `G${gr.grupo}`
-                                    : `G${gr.codigo}`;
+                                  const titulo = gr.grupo ? `G${gr.grupo}` : `G${gr.codigo}`;
                                   return (
-                                    <Card
+                                    <GroupCard
                                       key={`${gr.codigo}-${i}`}
-                                      data-selected={selected}
-                                      className={`relative cursor-pointer transition-shadow p-0 ${
-                                        selected
-                                          ? "border-ring ring-2 ring-ring/50"
-                                          : "hover:shadow-sm"
-                                      } ${
-                                        isGrupoSelected(key)
-                                          ? "border border-emerald-500 bg-emerald-50/40 dark:bg-emerald-900/10"
-                                          : ""
-                                      }`}
-                                    >
-                                      <CardContent className="p-3">
-                                        <div className="flex items-center justify-between gap-2">
-                                          <div className="text-sm font-medium">
-                                            <Badge className="align-middle inline-block bg-primary text-primary-foreground border-transparent">
-                                              {titulo}
-                                            </Badge>
-                                            {gr.sede ? (
-                                              <span className="ml-1 align-middle inline-block">
-                                                <Badge
-                                                  className={sedeBadgeClass(
-                                                    gr.sede
-                                                  )}
-                                                >
-                                                  {gr.sede}
-                                                </Badge>
-                                              </span>
-                                            ) : null}
-                                          </div>
-                                          <div className="flex items-center gap-2">
-                                            {gr.ocupacion ? (
-                                              <Badge
-                                                className={ocupacionBadgeClass(
-                                                  gr.ocupacion
-                                                )}
-                                              >
-                                                {gr.ocupacion}
-                                              </Badge>
-                                            ) : null}
-                                            <Button
-                                              size="icon"
-                                              variant="ghost"
-                                              aria-label={
-                                                isGrupoSelected(key)
-                                                  ? "Quitar del horario"
-                                                  : "Agregar al horario"
-                                              }
-                                              onClick={() =>
-                                                toggleGrupoSelected({
-                                                  ...gr,
-                                                  periodId: periodo,
-                                                  programId: programa,
-                                                  materiaId: materia,
-                                                })
-                                              }
-                                            >
-                                              {isGrupoSelected(key) ? (
-                                                <Minus className="h-4 w-4" />
-                                              ) : (
-                                                <Plus className="h-4 w-4" />
-                                              )}
-                                            </Button>
-                                          </div>
-                                        </div>
-                                        {(() => {
-                                          const labels = gr.mergedSlots?.length
-                                            ? gr.mergedSlots
-                                            : gr.horario || [];
-                                          const byDay = new Map<
-                                            string,
-                                            string[]
-                                          >();
-                                          for (const l of labels) {
-                                            const s = String(l);
-                                            const [dRaw, restRaw] =
-                                              s.split(":");
-                                            const d = (dRaw || "").trim();
-                                            const rest = (restRaw || "").trim();
-                                            if (!d) continue;
-                                            if (!byDay.has(d)) byDay.set(d, []);
-                                            if (rest) byDay.get(d)!.push(rest);
-                                          }
-                                          const entries = Array.from(
-                                            byDay.entries()
-                                          );
-                                          return entries.length ? (
-                                            <div className="mt-1 grid gap-1 grid-cols-1 sm:grid-cols-2">
-                                              {entries.map(([d, segs]) => (
-                                                <Badge
-                                                  key={d}
-                                                  className={`${dayBadgeClass(
-                                                    d
-                                                  )} w-full justify-start`}
-                                                >
-                                                  {d}
-                                                  {segs.length
-                                                    ? `: ${segs.join(" · ")}`
-                                                    : ""}
-                                                </Badge>
-                                              ))}
-                                            </div>
-                                          ) : null;
-                                        })()}
-                                        {gr.docentes ? (
-                                          <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 mt-1">
-                                            Docente: {gr.docentes}
-                                          </div>
-                                        ) : null}
-                                      </CardContent>
-                                    </Card>
+                                      keyId={`${gr.codigo}-${i}`}
+                                      gr={gr}
+                                      titulo={titulo}
+                                      isActiveSelected={selected}
+                                      isInHorario={isGrupoSelected(key)}
+                                      sedeBadgeClass={sedeBadgeClass}
+                                      dayBadgeClass={dayBadgeClass}
+                                      ocupacionBadgeClass={ocupacionBadgeClass}
+                                      onToggleClick={() =>
+                                        toggleGrupoSelected({
+                                          ...gr,
+                                          periodId: periodo,
+                                          programId: programa,
+                                          materiaId: materia,
+                                        })
+                                      }
+                                    />
                                   );
                                 })}
                               </div>
@@ -1508,115 +1414,20 @@ export default function Home() {
                       Limpiar
                     </Button>
                   ) : null}
-                  <div className="hidden md:flex items-center gap-1 ml-2 text-xs">
-                    <span className="text-muted-foreground">Mostrar:</span>
-                    <Button
-                      size="sm"
-                      variant={showTeacher ? "default" : "outline"}
-                      onClick={() => setShowTeacher((v) => !v)}
-                    >
-                      Docente
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={showCupos ? "default" : "outline"}
-                      onClick={() => setShowCupos((v) => !v)}
-                    >
-                      Cupos
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={showDay ? "default" : "outline"}
-                      onClick={() => setShowDay((v) => !v)}
-                    >
-                      Día
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={showHours ? "default" : "outline"}
-                      onClick={() => setShowHours((v) => !v)}
-                    >
-                      Horas
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={showLugar ? "default" : "outline"}
-                      onClick={() => setShowLugar((v) => !v)}
-                    >
-                      Lugar
-                    </Button>
-                  </div>
-                  <div className="flex md:hidden items-center gap-1 ml-2 text-xs">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setMostrarOpen(true)}
-                    >
-                      Mostrar
-                    </Button>
-                    <Dialog open={mostrarOpen} onOpenChange={setMostrarOpen}>
-                      <DialogContent
-                        className="p-4 gap-3"
-                        onOpenAutoFocus={(e) => e.preventDefault()}
-                      >
-                        <DialogHeader>
-                          <DialogTitle>Mostrar</DialogTitle>
-                        </DialogHeader>
-                        <div className="grid grid-cols-2 gap-2 text-sm">
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={showTeacher}
-                              onChange={(e) =>
-                                setShowTeacher(e.currentTarget.checked)
-                              }
-                            />
-                            <span>Docente</span>
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={showCupos}
-                              onChange={(e) =>
-                                setShowCupos(e.currentTarget.checked)
-                              }
-                            />
-                            <span>Cupos</span>
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={showDay}
-                              onChange={(e) =>
-                                setShowDay(e.currentTarget.checked)
-                              }
-                            />
-                            <span>Día</span>
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={showHours}
-                              onChange={(e) =>
-                                setShowHours(e.currentTarget.checked)
-                              }
-                            />
-                            <span>Horas</span>
-                          </label>
-                          <label className="flex items-center gap-2 col-span-2">
-                            <input
-                              type="checkbox"
-                              checked={showLugar}
-                              onChange={(e) =>
-                                setShowLugar(e.currentTarget.checked)
-                              }
-                            />
-                            <span>Lugar</span>
-                          </label>
-                        </div>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
+                  <MostrarControls
+                    className="ml-2"
+                    size="sm"
+                    showTeacher={showTeacher}
+                    showCupos={showCupos}
+                    showDay={showDay}
+                    showHours={showHours}
+                    showLugar={showLugar}
+                    onToggleTeacher={() => setShowTeacher((v) => !v)}
+                    onToggleCupos={() => setShowCupos((v) => !v)}
+                    onToggleDay={() => setShowDay((v) => !v)}
+                    onToggleHours={() => setShowHours((v) => !v)}
+                    onToggleLugar={() => setShowLugar((v) => !v)}
+                  />
                   <div className="flex items-center gap-1 ml-2 text-xs">
                     <span className="text-muted-foreground">Tamaño:</span>
                     <Button
